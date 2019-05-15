@@ -1,0 +1,362 @@
+%%%-------------------------------------------------------------------
+%%% @author Alex Misch <alex@alex-Lenovo>
+%%% @copyright (C) 2018, Alex Misch
+%%% @doc
+%%%
+%%% @end
+%%% Created :  4 Apr 2018 by Alex Misch <alex@alex-Lenovo>
+%%%-------------------------------------------------------------------
+-module(master_server).
+
+-behaviour(gen_server).
+
+%% API
+-export([start_link/0, start_link/1]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+	 terminate/2, code_change/3]).
+
+-define(SERVER, ?MODULE).
+
+-include_lib("include/inet.hrl").
+-include_lib("include/inet_sctp.hrl").
+-include("include/server_record.hrl").
+-include("include/transfer_record.hrl").
+
+-import(transport, [from_header/1, to_header/1]).
+
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts the server
+%%
+%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
+%% @end
+%%--------------------------------------------------------------------
+
+start_link(Servers) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [Servers], []).
+
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+%%%===================================================================
+%%% gen_server callbacks
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes the server
+%%
+%% @spec init(Args) -> {ok, State} |
+%%                     {ok, State, Timeout} |
+%%                     ignore |
+%%                     {stop, Reason}
+%% @end
+%%--------------------------------------------------------------------
+
+init([Old_Servers]) ->
+    process_flag(trap_exit, true),
+    io:format("Re-initializing master server from backup.~n"),
+
+    {Name, _IP_Old, _Udp_Port, _Port_Old} = Old_Servers#servers.backup,
+
+    %% Add port info.
+    {ok, Socket} = gen_sctp:open([{active, true}, {reuseaddr, true}, 
+				  {recbuf, 65000}]),
+    {ok, {IP, Port}} = inet:sockname(Socket),
+
+    io:format("SCTP Socket created: ~p:~p~n", [IP, Port]),
+
+    {ok, Dir} = file:get_cwd(),
+    Path = filename:join([Dir, "releases/0.1.0/sock.cfg"]),
+    {ok, FD1} = file:open(Path, [write, raw]),
+    file:write(FD1, integer_to_list(Port)),
+    file:close(FD1),
+
+    {Name_Backup, IP_Backup, Udp_Backup, Sctp_Backup, _Size}  = 
+	gen_balance:new_backup(),
+    Backup_Node = list_to_atom(Name_Backup),
+    net_adm:ping(Backup_Node),
+
+    New_Backup = {Backup_Node, IP_Backup, Udp_Backup, Sctp_Backup},
+    
+    Servers = Old_Servers#servers{socket=Socket, ip=IP, 
+				  port=Port, master={node()}, 
+				  backup=New_Backup},
+
+    gen_update:add_master(Servers),
+    gen_update:add_backup(New_Backup),
+
+    io:format("Setting new master info: ~p~n",
+	      [rpc:call(Backup_Node, application, set_env, 
+			[backup, master_node, Name])]),
+
+    io:format("starting backup app: ~p~n", 
+	      [rpc:call(Backup_Node, supervisor, 
+			start_child, [backup_delay_start, []])]),
+
+    gen_balance:update_backup(Backup_Node),
+
+    ok = gen_sctp:listen(Socket, true),
+
+    {ok, Servers};
+
+init([]) ->
+    process_flag(trap_exit, true),
+    io:format("Initializing master server.~n"),
+    {ok, Socket} = gen_sctp:open([{active, true}, {reuseaddr, true}, {recbuf, 65000}]),
+    {ok, {IP, Port}} = inet:sockname(Socket),
+
+    io:format("SCTP Socket created: ~p:~p~n", [IP, Port]),
+    {ok, Dir} = file:get_cwd(),
+    Path = filename:join([Dir, "releases/0.1.0/sock.cfg"]),
+    {ok, FD1} = file:open(Path, [write, raw]),
+    file:write(FD1, integer_to_list(Port)),
+    file:close(FD1),
+
+    Server = #servers{socket=Socket, ip=IP, port=Port, master={node()}},
+    gen_update:add_master(Server),
+    
+
+    ok = gen_sctp:listen(Socket, true),
+
+    {ok, Server}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling call messages
+%%
+%% @spec handle_call(Request, From, State) ->
+%%                                   {reply, Reply, State} |
+%%                                   {reply, Reply, State, Timeout} |
+%%                                   {noreply, State} |
+%%                                   {noreply, State, Timeout} |
+%%                                   {stop, Reason, Reply, State} |
+%%                                   {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+
+handle_call(_Request, _From, State) ->
+    Reply = ok,
+    {reply, Reply, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling cast messages
+%%
+%% @spec handle_cast(Msg, State) -> {noreply, State} |
+%%                                  {noreply, State, Timeout} |
+%%                                  {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling all non call/cast messages
+%%
+%% @spec handle_info(Info, State) -> {noreply, State} |
+%%                                   {noreply, State, Timeout} |
+%%                                   {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+
+handle_info({sctp, Socket, IP, Port, {[#sctp_sndrcvinfo{assoc_id=Assoc}], 
+				      Packet}}, #servers{socket=Socket,
+							 proxies=Proxies,
+							 fileservers=File_Servers} = Servers) ->
+        
+    case from_header(Packet) of
+
+	%% PJOIN request
+	{join} -> 
+	    Proxies1 = add_key({IP, Port}, Proxies),
+	    Servers1 = Servers#servers{proxies = Proxies1},
+	    io:format("Proxy joined: ~p~p~n", [IP, Port]),
+
+	    Data1 = to_header({?SNDCHNG, get_changes()}),
+	    gen_sctp:send(Socket, Assoc, 0, Data1),
+
+	    {noreply, Servers1};
+	    	
+	%% CURRLIST request
+	{currlist} ->
+	    %% Currlist = get_curr(Servers),
+	    Data1 = to_header({?SNDCHNG, get_changes()}),
+	    gen_sctp:send(Socket, Assoc, 0, Data1),
+	    
+	    {noreply, Servers};
+	
+	%% GETFILELOCATION request
+	{getfloc, Filename} ->
+	    case gen_update:lookup(Filename) of
+		{ok, {_Timestamp, Primary, _Secondary}} ->
+		    Data1 = to_header({?SNDFLOC, Filename, Primary}),
+		    gen_sctp:send(Socket, Assoc, 0, Data1),
+
+		    {noreply, Servers};
+
+		{error, not_found} ->
+		    Data1 = to_header({?ERROR, Filename}),
+		    gen_sctp:send(Socket, Assoc, 0, Data1),
+
+		    {noreply, Servers}
+
+	    end;
+	    
+	%% GETNEWFILELOCATION request 
+	{newfloc, Filename, Filesize} -> 
+	    {primary, Loc} = gen_balance:get_new_primary(Filesize),
+	    Data1 = to_header({?SNDFLOC, Filename, Loc}),
+	    gen_sctp:send(Socket, Assoc, 0, Data1),
+	    {noreply, Servers};
+	
+	{newsecfloc, Filename, Filesize} ->
+	    {_Timestamp, Primary, _Secondary} = gen_update:lookup(Filename),
+	    Loc = gen_balance:get_new_secondary(Primary, Filesize),
+	    Data1 = to_header({?SNDFLOC, Filename, Loc}), 
+	    gen_sctp:send(Socket, Assoc, 0, Data1),
+	    {noreply, Servers};
+	
+	%% FS Down
+	{fsdown, {IP, Port}} ->
+	    gen_balance:remove_server({IP, Port}),
+	    File_Servers1 = lists:delete({IP, Port}, File_Servers),
+	    Servers1 = Servers#servers{fileservers = File_Servers1},
+	    gen_update:update_record(Servers1),
+
+	    {noreply, Servers1};
+	
+	%% PQUIT request
+	{pquit, {IP, Port}} ->
+	    Proxies1 = lists:delete({IP, Port}, Proxies),
+	    Servers1 = Servers#servers{proxies = Proxies1},
+	    gen_update:update_record(Servers1),
+
+	    {noreply, Servers1};
+	
+	%% FSJOIN request
+	{fsjoin, {IP, Port}} -> 
+	    File_Servers1 = add_key({IP, Port}, File_Servers),
+	    Servers1 = Servers#servers{fileservers = File_Servers1},
+	    gen_update:update_record(Servers1),
+	    {noreply, Servers1};
+
+	%% DLT request
+	{dlt, Filename} ->
+	    case gen_update:lookup(Filename) of
+		{ok, {_Timestamp, {IP, Port}, _Secondary}} ->
+		    gen_update:delete(Filename);
+		Malformed ->
+		    io:format("Delete request error: ~p~n", [Malformed])
+	    end,
+	    
+	    {noreply, Servers};
+		
+	%% UPDTTS request
+	{updtts, Filename, Timestamp1} ->
+	    case gen_update:lookup(Filename) of
+		{ok, {_Timestamp, {IP, Port}, Secondary}} ->
+		    gen_update:update(Filename, {Timestamp1, {IP, Port}, Secondary});
+		Malformed ->
+		    io:format("Update request error: ~p~n", [Malformed])
+	    end,
+
+	    {noreply, Servers};
+	
+	%% FSQUIT request
+	{fsquit, {IP, Port}} ->
+	    gen_balance:remove_server({IP, Port}),
+	    File_Servers1 = lists:delete({IP, Port}, File_Servers),
+	    Servers1 = Servers#servers{fileservers = File_Servers1},
+	    gen_update:update_record(Servers1),
+
+	    {noreply, Servers1};
+	
+	{getchng} ->
+	    Data1 = to_header({?SNDCHNG, get_changes()}), %TODO IMPLEMENT GET_CHANGES LOGIC
+	    gen_sctp:send(Socket, Assoc, 0, Data1),
+
+	    {noreply, Servers};
+	
+	%% {backup} ->
+	%%     Servers1 = Servers#servers{backup = {IP, Port}},
+	%%     gen_update:update_record(Servers1),
+
+	%%     {noreply, Servers1};
+
+	{newmstr, _Location} ->
+	    {stop, normal};
+	
+	Error -> 
+	    io:format("Message receive error: ~p~n", [Error]),
+
+	    {noreply, Servers}
+    end;
+
+handle_info({sctp, _Socket, IP, Port, {_, _Assoc}}, _Old_Servers) ->
+    io:format("~p:~p joined the network!~n", [IP, Port]),
+
+    %% update list of servers every time a new server connects.
+    Servers = gen_update:get_servers(),
+    io:format("Servers: ~p~n", [Servers]),
+    
+    {noreply, Servers}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any
+%% necessary cleaning up. When it returns, the gen_server terminates
+%% with Reason. The return value is ignored.
+%%
+%% @spec terminate(Reason, State) -> void()
+%% @end
+%%--------------------------------------------------------------------
+terminate(_Reason, _State) ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Convert process state when code is changed
+%%
+%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
+%% @end
+%%--------------------------------------------------------------------
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+add_key(Key, []) ->
+    [Key];
+add_key(Key, [Key|T]) ->
+    [Key|T];
+add_key(Key, [H|T]) ->
+    [H|add_key(Key, T)].
+
+%% to_IP(IP_raw) ->
+%%     <<IP1:1/unit:8, IP2:1/unit:8, IP3:1/unit:8, IP4:1/unit:8>> = IP_raw,
+%%     {IP1, IP2, IP3, IP4}.
+
+%% from_IP({IP1, IP2, IP3, IP4}) ->
+%%     <<IP1, IP2, IP3, IP4>>.
+
+get_changes() ->
+    gen_update:get_files().

@@ -1,0 +1,16 @@
+<div>
+  <h2>New</h2>
+  <p> input form for uploading new document.</p>
+
+  <%= form_for @conn, doc_path(@conn, :create), [multipart: true], fn form -> %>
+  <div>
+    <label>Save as</label>
+    <%= text_input form, :id %>
+  </div>
+  <div>
+    <%= file_input form, :file, class: "form" %>
+  </div>
+  <%= submit "Upload"%>
+  <% end %>
+  
+</div>

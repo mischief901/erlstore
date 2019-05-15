@@ -1,0 +1,36 @@
+<div class="jumbotron">
+  <h2>Welcome</h2>
+  <p class="lead">Please take your time to test out this network based distributed file system implemented in Erlang and Elixir.</p>
+</div>
+
+<div class="row marketing">
+  <div class="col-lg-6">
+    <h4>Resources</h4>
+    <ul>
+      <li>
+	<%= link "Document List", to: "/docs" %>
+      </li>
+<!-- Additional links go here. Maybe an about page.
+       <li>
+
+      </li>
+      <li>
+        <a href="https://github.com/phoenixframework/phoenix">Source</a>
+      </li> -->
+    </ul>
+  </div>
+
+  <div class="col-lg-6">
+    <h4>Update Master</h4>
+    <%= form_for @conn, page_path(@conn, :master), [multipart: true, method: :patch],
+	fn form -> %>
+    <label>IP:
+      <%= text_input form, :master_ip, class: "master_info" %>
+    </label>
+    <label>Port:
+      <%= number_input form, :master_port, class: "master_info" %>
+    </label>
+    <%= submit "Connect to Master" %>
+    <% end %>
+  </div>
+</div>

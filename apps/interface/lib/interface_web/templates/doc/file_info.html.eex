@@ -1,0 +1,25 @@
+<div>
+  <h2>
+    <%= @file_name %>
+  </h2>
+  <!--
+    Displays last update for the given file and provides links to download
+    or update.
+    -->
+
+  <%= form_for @conn, doc_path(@conn, :update, @file_name),
+      [multipart: true, method: :patch], fn form -> %>
+  <div>
+    <%= file_input form, :file, class: "form" %>
+    <%= submit "Update" %>
+    <% end %>
+  </div>
+
+  <div class="btn">
+    <%= link("Download", method: :get, to: doc_path(@conn, :download, @file_name))%>
+  </div>
+
+  <div class="btn">
+    <%= link("Documents", method: :get, to: doc_path(@conn, :index)) %>
+  </div>
+</div>

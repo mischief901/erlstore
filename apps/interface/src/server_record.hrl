@@ -1,0 +1,1 @@
+-record(servers, {ip, port, socket, master, backup={}, proxies=[], fileservers=[]}).

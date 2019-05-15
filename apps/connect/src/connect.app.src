@@ -1,0 +1,17 @@
+%%% @author Alex Misch <alex@alex-Lenovo>
+%%% @copyright (C) 2018, Alex Misch
+%%% @doc
+%%% Metadata for Erlang proxy application. Related modules need to be updated here.
+%%% @end
+%%% Created : 23 Mar 2018 by Alex Misch <alex@alex-Lenovo>
+
+{application, connect,
+ [{description, "Connects the new server to the cluster."},
+  {vsn, "0.1.0"},
+  {modules, [connect_app,
+	     connect_sup,
+	     connect]},
+  {registered, [connect_sup]},
+  {applications, [kernel, stdlib, sasl]},
+  {mod, {connect_app, []}}
+ ]}.

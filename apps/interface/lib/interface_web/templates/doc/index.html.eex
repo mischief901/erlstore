@@ -1,0 +1,31 @@
+<div>
+  <h2>Documents:</h2>
+
+  <table>
+    <thead>
+      <tr>
+	<th>
+	  File Name
+	</th>
+	<th>
+	  Last Modified
+	</th>
+      </tr>
+    </thead>
+    <tbody>
+      <%= for {file_name, timestamp} <- @files do %>
+	  <tr class="file_info">
+	    <td>
+	      <%=link(file_name, to: doc_path(@conn, :show, file_name)) %>
+	    </td>
+	    <td>
+	      <%= timestamp %>
+	    </td>
+	  </tr>
+	  <% end %>
+    </tbody>
+  </table>
+    <div class="btn">
+	<%=link("Add File", to: doc_path(@conn, :new)) %>
+    </div>
+</div>

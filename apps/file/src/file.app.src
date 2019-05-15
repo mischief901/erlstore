@@ -1,0 +1,20 @@
+%%% @author Alex Misch <alex@alex-Lenovo>
+%%% @copyright (C) 2018, Alex Misch
+%%% @doc
+%%% Metadata for Erlang proxy application. Related modules need to be updated here.
+%%% @end
+%%% Created : 23 Mar 2018 by Alex Misch <alex@alex-Lenovo>
+
+{application, file,
+ [{description, "Operations for the file storage system."},
+  {vsn, "0.1.0"},
+  {modules, [file_app,
+	     file_sup,
+	     file_server,
+	     transport,
+	     file_statem,
+	     file_statem_sup]},
+  {registered, [file_sup]},
+  {applications, [kernel, stdlib, sasl]},
+  {mod, {file_app, []}}
+ ]}.

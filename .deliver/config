@@ -1,0 +1,30 @@
+LOCAL="true"
+
+APP="erlstore"
+
+PWD = "$(pwd)"
+
+BUILD_HOST="localhost"
+BUILD_USER="$USER"
+BUILD_AT="$PWD/build"
+
+STAGING_HOSTS="localhost"
+STAGING_USER="$USER"
+DELIVER_TO="$PWD/release"
+
+TARGET_MIX_ENV="dev"
+
+pre_erlang_get_and_update_deps() {
+  local _prod_secret_path="/home/builder/prod.secret.exs"
+  if [ "$TARGET_MIX_ENV" = "prod" ]; then
+    __sync_remote "
+      ln -sfn '$_prod_secret_path' '$BUILD_AT/config/prod.secret.exs'
+    "
+  fi
+  
+  if[[ "$LOCAL" != "true" ]]; then # use remote release store
+    RELEASE_STORE="user@remote-release-store-host.com:~/releases"
+  else # use default local release store
+    echo -e "\n${txtylw}Using local release store.${txtrst}"
+  fi
+}

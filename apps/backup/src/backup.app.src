@@ -1,0 +1,20 @@
+%%% -*- erlang-indent-level: 4;indent-tabs-mode: nil -*-
+%%% @author Alex Misch <alex@alex-Lenovo>
+%%% @copyright (C) 2018, Alex Misch
+%%% @doc
+%%% Metadata for Erlang proxy application. Related modules need to be updated here.
+%%% @end
+%%% Created : 23 Mar 2018 by Alex Misch <alex@alex-Lenovo>
+
+{application, backup,
+ [{description, "Creates an event handler for tracking all table updates that the Master server makes."},
+  {vsn, "0.1.0"},
+  {modules, [backup_app,
+	     backup_sup,
+	     backup_event,
+             backup_guard,
+             backup_guard_sup]},
+  {registered, [backup_event]},
+  {applications, [kernel, stdlib, sasl]},
+  {mod, {backup_app, []}}
+ ]}.

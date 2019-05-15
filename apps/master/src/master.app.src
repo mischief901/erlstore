@@ -1,0 +1,8 @@
+{application, master, [
+	{description, "The master server"},
+	{vsn, "0.1.1"},
+	{applications, [kernel, stdlib, sasl]},
+	{modules, [master, master_app, master_sup, master_store, 
+		   gen_balance, balancer_sup, gen_update]},
+        {mod, {master_app, []}}
+]}.
